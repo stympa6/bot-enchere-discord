@@ -3,7 +3,9 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 
-TOKEN = ""
+import os
+TOKEN = os.getenv("TOKEN")
+
 TICKET_CHANNEL_ID = 1468668834667040829
 
 intents = discord.Intents.default()
