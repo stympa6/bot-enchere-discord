@@ -4,99 +4,134 @@ from discord.ext import commands
 import asyncio
 import os
 
-TOKEN = os.getenv("TOKEN")  # NE MET JAMAIS LE TOKEN EN DUR
-
-TICKET_CHANNEL_ID = 1468668834667040829  # salon résultat
+# =====================
+# CONFIG
+# =====================
+GUILD_ID = 1468668056053219641
+TOKEN = os.getenv("TOKEN")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# =====================
+# VARIABLES ENCHÈRE
+# =====================
+enchere_active = False
+vendeur = None
+meilleure_offre = 0
+meilleur_encherisseur = None
+participants = set()
 
-class EnchereView(discord.ui.View):
-    def __init__(self, vendeur, prix_depart, duree):
-        super().__init__(timeout=duree * 60)
-        self.vendeur = vendeur
-        self.meilleure_offre = prix_depart
-        self.meilleur_offreur = None
-        self.terminee = False
-
-    @discord.ui.button(label="💰 Miser +10€", style=discord.ButtonStyle.success)
-    async def miser(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user == self.vendeur:
-            await interaction.response.send_message(
-                "❌ Le vendeur ne peut pas enchérir.",
-                ephemeral=True
-            )
-            return
-
-        if self.terminee:
-            await interaction.response.send_message(
-                "⏰ L’enchère est terminée.",
-                ephemeral=True
-            )
-            return
-
-        self.meilleure_offre += 10
-        self.meilleur_offreur = interaction.user
-
-        await interaction.response.edit_message(
-            embed=self.get_embed(),
-            view=self
-        )
-
-    def get_embed(self):
-        embed = discord.Embed(
-            title="🔥 Enchère en cours",
-            color=discord.Color.gold()
-        )
-        embed.add_field(name="👤 Vendeur", value=self.vendeur.mention, inline=False)
-        embed.add_field(name="💰 Meilleure offre", value=f"{self.meilleure_offre} €", inline=True)
-
-        if self.meilleur_offreur:
-            embed.add_field(name="🏆 Meilleur enchérisseur", value=self.meilleur_offreur.mention, inline=True)
-        else:
-            embed.add_field(name="🏆 Meilleur enchérisseur", value="Aucun", inline=True)
-
-        return embed
-
-    async def on_timeout(self):
-        self.terminee = True
-        channel = bot.get_channel(TICKET_CHANNEL_ID)
-
-        if channel:
-            if self.meilleur_offreur:
-                await channel.send(
-                    f"🎉 **Enchère terminée**\n"
-                    f"👤 Vendeur : {self.vendeur.mention}\n"
-                    f"🏆 Gagnant : {self.meilleur_offreur.mention}\n"
-                    f"💰 Prix final : **{self.meilleure_offre} €**"
-                )
-            else:
-                await channel.send(
-                    f"⏰ **Enchère terminée sans participant**\n"
-                    f"👤 Vendeur : {self.vendeur.mention}"
-                )
-
-
+# =====================
+# BOT READY
+# =====================
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
-    print("✅ Bot prêt avec commandes slash")
+    guild = discord.Object(id=GUILD_ID)
+    await bot.tree.sync(guild=guild)
+    print("✅ Bot connecté")
+    print("✅ Slash commands synchronisées (GUILD)")
 
-
-@bot.tree.command(name="enchere", description="Créer une enchère avec mises")
-@app_commands.describe(
-    prix="Prix de départ",
-    duree="Durée en minutes"
+# =====================
+# COMMANDE /enchere
+# =====================
+@bot.tree.command(
+    name="enchere",
+    description="Lancer une enchère",
+    guild=discord.Object(id=GUILD_ID)
 )
-async def enchere(interaction: discord.Interaction, prix: int, duree: int):
+@app_commands.describe(
+    prix_depart="Prix de départ",
+    duree="Durée en secondes"
+)
+async def enchere(
+    interaction: discord.Interaction,
+    prix_depart: int,
+    duree: int
+):
+    global enchere_active, vendeur, meilleure_offre, meilleur_encherisseur, participants
+
+    if enchere_active:
+        await interaction.response.send_message(
+            "❌ Une enchère est déjà en cours",
+            ephemeral=True
+        )
+        return
+
+    enchere_active = True
     vendeur = interaction.user
-    view = EnchereView(vendeur, prix, duree)
+    meilleure_offre = prix_depart
+    meilleur_encherisseur = None
+    participants = set()
 
     await interaction.response.send_message(
-        embed=view.get_embed(),
-        view=view
+        f"🔥 **ENCHÈRE LANCÉE**\n"
+        f"Vendeur : {vendeur.mention}\n"
+        f"Prix de départ : **{prix_depart}€**\n"
+        f"Durée : **{duree} secondes**\n\n"
+        f"➡️ Utilisez `/miser` pour enchérir"
     )
 
+    await asyncio.sleep(duree)
 
+    enchere_active = False
+
+    if meilleur_encherisseur:
+        await interaction.channel.send(
+            f"🏆 **ENCHÈRE TERMINÉE**\n"
+            f"Gagnant : {meilleur_encherisseur.mention}\n"
+            f"Prix final : **{meilleure_offre}€**\n\n"
+            f"📩 {vendeur.mention} & {meilleur_encherisseur.mention}, contactez-vous !"
+        )
+    else:
+        await interaction.channel.send(
+            "❌ Enchère terminée sans aucune offre"
+        )
+
+# =====================
+# COMMANDE /miser
+# =====================
+@bot.tree.command(
+    name="miser",
+    description="Faire une offre",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(
+    montant="Montant de votre offre"
+)
+async def miser(interaction: discord.Interaction, montant: int):
+    global meilleure_offre, meilleur_encherisseur, participants
+
+    if not enchere_active:
+        await interaction.response.send_message(
+            "❌ Aucune enchère en cours",
+            ephemeral=True
+        )
+        return
+
+    if interaction.user == vendeur:
+        await interaction.response.send_message(
+            "❌ Le vendeur ne peut pas enchérir",
+            ephemeral=True
+        )
+        return
+
+    if montant <= meilleure_offre:
+        await interaction.response.send_message(
+            f"❌ L'offre doit être supérieure à {meilleure_offre}€",
+            ephemeral=True
+        )
+        return
+
+    meilleure_offre = montant
+    meilleur_encherisseur = interaction.user
+    participants.add(interaction.user)
+
+    await interaction.response.send_message(
+        f"💰 Nouvelle offre : **{montant}€** par {interaction.user.mention}"
+    )
+
+# =====================
+# RUN
+# =====================
 bot.run(TOKEN)
