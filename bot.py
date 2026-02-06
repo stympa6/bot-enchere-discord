@@ -63,7 +63,7 @@ async def on_ready():
     print("✅ Bot prêt")
 
 # ===== COMMANDE SLASH =====
-@bot.tree.command(name="enchere", description="Créer une enchère")
+@bot.tree.command(name="enchere_v2", description="Créer une enchère (v2)")
 @app_commands.describe(
     prix="Prix de départ",
     duree="Durée en minutes",
