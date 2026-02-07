@@ -3,9 +3,20 @@ import asyncio
 import discord
 from discord.ext import commands
 
+# =======================
+# TOKEN
+# =======================
 TOKEN = os.getenv("DISCORD_TOKEN")
 
+if not TOKEN:
+    raise RuntimeError("❌ DISCORD_TOKEN manquant")
+
+# =======================
+# INTENTS
+# =======================
 intents = discord.Intents.default()
+intents.message_content = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # =======================
@@ -20,7 +31,7 @@ active_auction = {
 }
 
 # =======================
-# BOUTON MISER
+# VIEW BOUTON
 # =======================
 class BidView(discord.ui.View):
     def __init__(self):
@@ -28,6 +39,7 @@ class BidView(discord.ui.View):
 
     @discord.ui.button(label="💰 Miser", style=discord.ButtonStyle.green)
     async def bid(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         if active_auction["ended"]:
             await interaction.response.send_message(
                 "❌ L’enchère est terminée.",
@@ -38,18 +50,18 @@ class BidView(discord.ui.View):
         await interaction.response.send_modal(BidModal())
 
 # =======================
-# MODAL DE MISE
+# MODAL MISE
 # =======================
 class BidModal(discord.ui.Modal, title="Placer une mise"):
     amount = discord.ui.TextInput(
-        label="Montant de la mise (€)",
-        placeholder="Ex: 150",
+        label="Montant",
+        placeholder="Ex : 150",
         required=True
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            bid_amount = int(self.amount.value)
+            bid = int(self.amount.value)
         except ValueError:
             await interaction.response.send_message(
                 "❌ Montant invalide.",
@@ -57,50 +69,61 @@ class BidModal(discord.ui.Modal, title="Placer une mise"):
             )
             return
 
-        if bid_amount <= active_auction["highest_bid"]:
+        if bid <= active_auction["highest_bid"]:
             await interaction.response.send_message(
                 f"❌ La mise doit être supérieure à {active_auction['highest_bid']} €.",
                 ephemeral=True
             )
             return
 
-        active_auction["highest_bid"] = bid_amount
+        active_auction["highest_bid"] = bid
         active_auction["highest_bidder"] = interaction.user
 
         embed = active_auction["message"].embeds[0]
         embed.set_field_at(
             0,
             name="💸 Enchère actuelle",
-            value=f"{bid_amount} € par {interaction.user.mention}",
+            value=f"{bid} € par {interaction.user.mention}",
             inline=False
         )
 
         await active_auction["message"].edit(embed=embed, view=BidView())
+
         await interaction.response.send_message(
-            f"✅ Mise enregistrée : {bid_amount} €",
+            f"✅ Mise enregistrée : {bid} €",
             ephemeral=True
         )
 
 # =======================
-# COMMANDE TEXTE POUR LANCER L’ENCHÈRE
-# (PAS UNE SLASH COMMANDE)
+# COMMANDE TEXTE
 # =======================
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def lancer(ctx, titre: str, prix_depart: int, duree: int):
+@bot.command(name="startenchere")
+async def startenchere(ctx, *, args: str):
+
     if not active_auction["ended"]:
         await ctx.send("❌ Une enchère est déjà en cours.")
         return
 
+    try:
+        titre, prix, duree = [x.strip() for x in args.split("|")]
+        prix = int(prix)
+        duree = int(duree)
+    except Exception:
+        await ctx.send(
+            "❌ Format invalide.\n"
+            "**Exemple :** `!startenchere iPhone 15 | 100 | 10`"
+        )
+        return
+
     embed = discord.Embed(
         title=f"🧾 Enchère : {titre}",
-        description="Clique sur **Miser** pour participer",
+        description="Clique sur **💰 Miser** pour participer",
         color=discord.Color.gold()
     )
 
     embed.add_field(
         name="💸 Enchère actuelle",
-        value=f"{prix_depart} € (aucun enchérisseur)",
+        value=f"{prix} € (aucun enchérisseur)",
         inline=False
     )
 
@@ -109,14 +132,12 @@ async def lancer(ctx, titre: str, prix_depart: int, duree: int):
     active_auction.update({
         "message": message,
         "channel": ctx.channel,
-        "highest_bid": prix_depart,
+        "highest_bid": prix,
         "highest_bidder": None,
         "ended": False
     })
 
-    await ctx.send(
-        f"✅ Enchère lancée pour **{duree} minute(s)**"
-    )
+    await ctx.send(f"⏱️ Enchère lancée pour **{duree} minute(s)**")
 
     await asyncio.sleep(duree * 60)
 
@@ -132,17 +153,10 @@ async def lancer(ctx, titre: str, prix_depart: int, duree: int):
         await ctx.send("❌ Enchère terminée sans enchérisseur.")
 
 # =======================
-# READY : SUPPRESSION DES SLASH COMMANDS
+# READY
 # =======================
 @bot.event
 async def on_ready():
-    try:
-        bot.tree.clear_commands(guild=None)
-        await bot.tree.sync()
-        print("🧹 Toutes les slash commands supprimées")
-    except Exception as e:
-        print("Erreur clear/sync :", e)
-
     print(f"✅ Bot connecté : {bot.user}")
 
 bot.run(TOKEN)
