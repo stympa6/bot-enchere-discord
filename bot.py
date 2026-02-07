@@ -1,117 +1,139 @@
+import os
 import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
-import os
 
 TOKEN = os.getenv("TOKEN")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ---------------- CONFIG ----------------
-ANNONCE_CHANNEL_ID = 1468668834667040829  # salon annonces
-TICKET_CATEGORY_ID = 1468669605353361520  # catégorie tickets
-MISE_INCREMENT = 10
-# ---------------------------------------
-
+# =========================
+# STOCKAGE ENCHÈRE
+# =========================
 auction = {
     "active": False,
+    "seller": None,
+    "item": None,
     "price": 0,
-    "winner": None,
-    "message": None,
-    "task": None
+    "highest_bidder": None,
+    "message": None
 }
 
-# ---------- BOUTON MISER ----------
-class BidButton(discord.ui.View):
+# =========================
+# READY + RESYNC
+# =========================
+@bot.event
+async def on_ready():
+    try:
+        bot.tree.clear_commands()
+        await bot.tree.sync()
+    except:
+        pass
+
+    print("✅ Bot prêt – commandes synchronisées")
+
+# =========================
+# BOUTON MISER
+# =========================
+class BidView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="💰 Miser +10€", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="💰 Miser", style=discord.ButtonStyle.green)
     async def bid(self, interaction: discord.Interaction, button: discord.ui.Button):
+
         if not auction["active"]:
-            await interaction.response.send_message("❌ L'enchère est terminée.", ephemeral=True)
+            await interaction.response.send_message("❌ L’enchère est terminée.", ephemeral=True)
             return
 
-        auction["price"] += MISE_INCREMENT
-        auction["winner"] = interaction.user
+        if interaction.user.id == auction["seller"]:
+            await interaction.response.send_message("❌ Le vendeur ne peut pas miser.", ephemeral=True)
+            return
+
+        new_price = auction["price"] + 1
+        auction["price"] = new_price
+        auction["highest_bidder"] = interaction.user.id
 
         embed = auction["message"].embeds[0]
-        embed.set_field_at(1, name="💰 Enchère actuelle", value=f"{auction['price']} €", inline=False)
-        embed.set_field_at(2, name="🏆 Meilleur enchérisseur", value=interaction.user.mention, inline=False)
+        embed.set_field_at(
+            1,
+            name="💸 Offre actuelle",
+            value=f"{auction['price']} €",
+            inline=False
+        )
+        embed.set_field_at(
+            2,
+            name="🏆 Meilleur enchérisseur",
+            value=f"<@{interaction.user.id}>",
+            inline=False
+        )
 
         await auction["message"].edit(embed=embed, view=self)
-        await interaction.response.send_message("✅ Mise prise en compte !", ephemeral=True)
+        await interaction.response.send_message(f"✅ Mise acceptée : **{new_price} €**", ephemeral=True)
 
-# ---------- FIN ENCHÈRE ----------
-async def end_auction():
-    await asyncio.sleep(auction["duration"] * 60)
-    auction["active"] = False
-
-    annonce_channel = bot.get_channel(ANNONCE_CHANNEL_ID)
-
-    if auction["winner"]:
-        embed = discord.Embed(
-            title="🏁 Enchère terminée",
-            description=f"Objet remporté par {auction['winner'].mention} pour **{auction['price']} €**",
-            color=discord.Color.gold()
-        )
-        await annonce_channel.send(embed=embed)
-
-        guild = annonce_channel.guild
-        category = discord.utils.get(guild.categories, id=TICKET_CATEGORY_ID)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            auction["winner"]: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-        }
-
-        ticket = await guild.create_text_channel(
-            name=f"ticket-{auction['winner'].name}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        await ticket.send(
-            f"🎟️ Ticket créé pour {auction['winner'].mention}\n"
-            f"Prix final : **{auction['price']} €**"
-        )
-
-    auction["message"] = None
-
-# ---------- SLASH COMMAND ----------
+# =========================
+# COMMANDE /ENCHERE
+# =========================
 @bot.tree.command(name="enchere", description="Lancer une enchère")
-@app_commands.describe(prix="Prix de départ", duree="Durée en minutes")
-async def enchere(interaction: discord.Interaction, prix: int, duree: int):
+@app_commands.describe(
+    objet="Objet à vendre",
+    prix_depart="Prix de départ",
+    duree="Durée en minutes"
+)
+async def enchere(
+    interaction: discord.Interaction,
+    objet: str,
+    prix_depart: int,
+    duree: int
+):
+
     if auction["active"]:
         await interaction.response.send_message("❌ Une enchère est déjà en cours.", ephemeral=True)
         return
 
     auction["active"] = True
-    auction["price"] = prix
-    auction["winner"] = None
-    auction["duration"] = duree
+    auction["seller"] = interaction.user.id
+    auction["item"] = objet
+    auction["price"] = prix_depart
+    auction["highest_bidder"] = None
 
     embed = discord.Embed(
-        title="🔥 Enchère en cours",
-        color=discord.Color.blue()
+        title="🔥 ENCHÈRE EN COURS",
+        color=discord.Color.gold()
     )
-    embed.add_field(name="💰 Prix de départ", value=f"{prix} €", inline=False)
-    embed.add_field(name="💰 Enchère actuelle", value=f"{prix} €", inline=False)
+    embed.add_field(name="📦 Objet", value=objet, inline=False)
+    embed.add_field(name="💸 Offre actuelle", value=f"{prix_depart} €", inline=False)
     embed.add_field(name="🏆 Meilleur enchérisseur", value="Aucun", inline=False)
-    embed.add_field(name="⏱️ Durée", value=f"{duree} minutes", inline=False)
+    embed.set_footer(text=f"⏱️ Durée : {duree} minute(s)")
 
-    view = BidButton()
-    await interaction.response.send_message(embed=embed, view=view)
+    await interaction.response.send_message(embed=embed, view=BidView())
+    msg = await interaction.original_response()
+    auction["message"] = msg
 
-    auction["message"] = await interaction.original_response()
-    auction["task"] = asyncio.create_task(end_auction())
+    await asyncio.sleep(duree * 60)
 
-# ---------- READY ----------
-@bot.event
-async def on_ready():
-    await bot.tree.sync()
-    print("✅ Bot prêt – commandes synchronisées")
+    # =========================
+    # FIN ENCHÈRE
+    # =========================
+    auction["active"] = False
+
+    if auction["highest_bidder"]:
+        await interaction.channel.send(
+            f"🏁 **Enchère terminée !**\n"
+            f"📦 **{auction['item']}**\n"
+            f"🏆 Gagnant : <@{auction['highest_bidder']}>\n"
+            f"💰 Prix final : **{auction['price']} €**\n"
+            f"👤 Vendeur : <@{auction['seller']}>"
+        )
+    else:
+        await interaction.channel.send("❌ Enchère terminée sans aucune offre.")
+
+# =========================
+# RUN
+# =========================
+if TOKEN is None:
+    raise RuntimeError("❌ TOKEN manquant (variable d’environnement)")
 
 bot.run(TOKEN)
