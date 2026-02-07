@@ -9,10 +9,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print("🧹 Nettoyage des slash commands...")
+    print("🧹 SUPPRESSION TOTALE DES SLASH COMMANDS...")
     bot.tree.clear_commands(guild=None)
     await bot.tree.sync()
-    print("✅ TOUTES les slash commands supprimées")
+    print("✅ TOUTES LES COMMANDES SONT SUPPRIMÉES")
     await bot.close()
 
 bot.run(TOKEN)
