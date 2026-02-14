@@ -5,7 +5,9 @@ import asyncio
 # =======================
 # CONFIG
 # =======================
-TOKEN = ""
+import os
+
+TOKEN = os.getenv("TOKEN")
 
 TICKET_CATEGORY_ID = 1468668766924832861
 STAFF_ROLE_ID = 111111111111111111
